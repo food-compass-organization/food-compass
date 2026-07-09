@@ -7,12 +7,12 @@
 
 ## 0. 사전 준비
 
-- [ ] 레포 폴더 구조 확정 및 생성
+- [v] 레포 폴더 구조 확정 및 생성
   - **내용**: `app/agents/`, `app/core/`, `app/prompts/`, `app/graph.py`, `app/api.py`, `app/schemas.py`, `app/vector_store.py`, `tests/` 폴더 생성
   - **Tool**: GitHub, VS Code
   - **참고**: 코드읽기 가이드의 Medical QA 예제 구조 그대로 재사용
 
-- [ ] 가상환경 및 의존성 설치
+- [v] 가상환경 및 의존성 설치
   - **내용**: `langgraph`, `langchain`, `pydantic`, `fastapi`, `pytest`, `python-dotenv`, `chromadb` 설치
   - **Tool**: `uv` 또는 `venv` + `pip`
   - **명령어 예시**: `uv add langgraph langchain pydantic fastapi pytest python-dotenv chromadb`
