@@ -14,13 +14,14 @@
 CREATE TABLE IF NOT EXISTS price_cache (
     item_name   TEXT        PRIMARY KEY,
     source      TEXT        NOT NULL DEFAULT 'KAMIS',
+    category_code TEXT,
     price_data  JSONB       NOT NULL,
     cached_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- price_data JSONB 구조 (RawPriceOutput 스키마와 1:1 대응)
 -- {
---   "dpr1": "4,500",   -- 당일가 (원, 콤마 포함 문자열 · "-" = 결측)
+--   "dpr3": "4,500",   -- 전주가 (원, 콤마 포함 문자열 · "-" = 결측)
 --   "dpr5": "4,200",   -- 전월가 (원)
 --   "dpr7": "2,800",   -- 평년가 (원, judge_price 기준가)
 --   "unit": "100g"     -- 판매 단위 (예: "1kg", "1개", "100g")

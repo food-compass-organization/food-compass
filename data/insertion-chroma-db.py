@@ -20,6 +20,7 @@ from tqdm import tqdm
 from collections import defaultdict
 from langchain_upstage import ChatUpstage
 from langchain_core.messages import HumanMessage, SystemMessage
+from chromadb.utils import embedding_functions
 
 load_dotenv()  # .env 파일을 읽어 os.environ에 반영
 
@@ -32,10 +33,32 @@ LLM_MODEL = os.getenv("LLM_MODEL", "solar-pro")
 CHROMA_DB_PATH = "./data/chroma_db"
 COLLECTION_NAME = "all_food_products"  # 모든 함수가 이 상수 하나만 참조
 
+# 한국어 문장 유사도(STS)에 특화된 임베딩 모델.
+# 기본 Chroma 임베딩(all-MiniLM-L6-v2, 영어 위주)보다 한국어 단어/문장 비교에 훨씬 적합.
+EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL", "jhgan/ko-sroberta-multitask")
+korean_embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
+    model_name=EMBEDDING_MODEL_NAME
+)
+
 DESC_SYSTEM_PROMPT = (
-    "너는 농수산물/생필품 품목명을 보고 그게 무엇인지 짧게 설명하는 도우미다. "
-    "입력으로 품목명 하나가 주어지면, 20자 내외의 한국어 한 문장으로만 설명하라. "
-    "다른 말은 절대 덧붙이지 말고 설명 문장 하나만 답하라."
+    '''
+    너는 농축수산물/생필품 품목의 검색용 설명을 만드는 도우미다.
+    입력으로 품목명 하나가 주어지면, 반드시 "품목명: 설명" 형식으로 한 줄만 답하라.
+
+    설명 부분에는 그 품목에 실제로 해당하는 것들을 자연스럽게 녹여 넣어라:
+    부류(채소/과일/곡물/수산물/축산물 등), 맛(달다/맵다/짜다/고소하다/새콤하다 등),
+    식감이나 색깔·생김새, 주로 쓰이는 요리나 용도.
+
+    "~는 ~이다"처럼 품목명을 그대로 풀어쓰는 사전적 정의문은 피하고,
+    사람이 실제로 검색할 때 쓸 법한 자연스러운 표현으로 설명 부분은 30자 내외로 작성하라.
+    숫자, 브랜드명, 가격 정보는 포함하지 마라.
+    "품목명: 설명" 형식 외에 다른 말은 절대 덧붙이지 마라.
+
+    예시:
+    고춧가루: 매콤한 붉은빛 양념, 김치나 찌개에 널리 쓰임
+    갈치: 길고 은빛 도는 생선, 구이나 조림으로 즐겨 먹음
+    딸기: 새콤달콤한 붉은 과일, 디저트나 간식으로 인기
+    '''
 )
 
 
@@ -58,7 +81,6 @@ def check_env_vars() -> bool:
 
 
 # ── 1. KAMIS (농수산물 + 축산물) ────────────────────────────────────────
-
 def get_kamis_names() -> list[str]:
     """KAMIS productInfo(5개 부류) + dailySalesList(축산물)을 합쳐서 전체 품목명 반환."""
     url = "https://www.kamis.or.kr/service/price/xml.do"
@@ -152,8 +174,9 @@ def get_price_gokr_items() -> list[dict]:
 # ── 3. 공통 유틸 ────────────────────────────────────────────────────
 
 def names_to_items(names: list[str], prefix: str) -> list[dict]:
-    """list[str] → [{'id': ..., 'name': ...}] 변환. id에 출처 prefix를 붙여 충돌 방지."""
-    return [{"id": f"{prefix}_{i}", "name": name} for i, name in enumerate(names)]
+    """list[str] → [{'id': ..., 'document': ...}] 변환. id에 출처 prefix를 붙여 충돌 방지.
+    document가 곧 임베딩되는 텍스트."""
+    return [{"id": f"{prefix}_{i}", "document": name} for i, name in enumerate(names)]
 
 
 def save_items_to_chroma(
@@ -162,18 +185,27 @@ def save_items_to_chroma(
     batch_size: int = 50,
     path: str = CHROMA_DB_PATH,
 ):
-    """items([{'id', 'name'}, ...])를 Chroma DB 컬렉션에 배치 저장."""
+    """items([{'id', 'document', 'metadata'(선택)}, ...])를 Chroma DB 컬렉션에 배치 저장.
+    'document'에 넣은 텍스트가 곧 임베딩(벡터화)되는 대상입니다."""
     client = chromadb.PersistentClient(path=path)
-    collection = client.get_or_create_collection(name=collection_name)
+    collection = client.get_or_create_collection(
+        name=collection_name,
+        embedding_function=korean_embedding_fn,
+    )
 
-    names = [it["name"] for it in items]
+    documents = [it["document"] for it in items]
     ids = [it["id"] for it in items]
+    metadatas = [it.get("metadata") for it in items]
+    has_metadata = any(m for m in metadatas)
 
     for i in tqdm(range(0, len(items), batch_size), desc=f"'{collection_name}' 저장 중"):
-        collection.add(
-            documents=names[i:i + batch_size],
-            ids=ids[i:i + batch_size],
-        )
+        batch_kwargs = {
+            "documents": documents[i:i + batch_size],
+            "ids": ids[i:i + batch_size],
+        }
+        if has_metadata:
+            batch_kwargs["metadatas"] = metadatas[i:i + batch_size]
+        collection.add(**batch_kwargs)
 
     print(f"Chroma DB '{collection_name}'에 누적 {collection.count()}개 품목 저장 완료")
     return collection
@@ -219,38 +251,60 @@ def delete_all_collections(path: str = CHROMA_DB_PATH, remove_files: bool = True
 
 
 def test_similar_search(
-    query: str = "떡볶이",
+    query: str,
     n_results: int = 3,
     path: str = CHROMA_DB_PATH,
     collection_name: str = COLLECTION_NAME,
 ):
-    """저장된 컬렉션에서 query와 비슷한 단어 n개 찾기 (description 있으면 같이 출력)."""
+    """저장된 컬렉션에서 query와 비슷한 텍스트 n개 찾기 (검색어 자기 자신은 제외).
+    KAMIS 품목은 documents가 '설명'이라, metadata의 원래 이름도 같이 보여줍니다."""
     client = chromadb.PersistentClient(path=path)
-    collection = client.get_collection(collection_name)
+    collection = client.get_collection(
+        collection_name,
+        embedding_function=korean_embedding_fn,
+    )
 
+    # 자기 자신이 걸러질 걸 대비해 필요한 개수보다 여유 있게 가져온다
     results = collection.query(
         query_texts=[query],
-        n_results=n_results,
+        n_results=n_results + 5,
+        where={"source": "kamis"},
         include=["documents", "distances", "metadatas"],
     )
 
-    print(f"── '{query}'와 비슷한 품목 {n_results}개 (collection: {collection_name}) ──")
-    for name, distance, id_, meta in zip(
+    print(f"── '{query}'와 비슷한 항목 {n_results}개 (collection: {collection_name}) ──")
+
+    shown = 0
+    for document, distance, id_, meta in zip(
         results["documents"][0],
         results["distances"][0],
         results["ids"][0],
         results["metadatas"][0],
     ):
-        desc = (meta or {}).get("description", "")
-        desc_suffix = f" — {desc}" if desc else ""
-        print(f"  {name}  (id={id_}, distance={distance:.4f}){desc_suffix}")
+        original_name = (meta or {}).get("name")
+
+        # 검색어 자기 자신(설명이든 원래 이름이든)과 완전히 일치하면 제외
+        if document == query or original_name == query:
+            continue
+
+        if original_name and original_name != document:
+            print(f"  {original_name}  (id={id_}, distance={distance:.4f}) — {document}")
+        else:
+            print(f"  {document}  (id={id_}, distance={distance:.4f})")
+
+        shown += 1
+        if shown >= n_results:
+            break
+
+    if shown == 0:
+        print("  (자기 자신을 제외하고 나니 결과가 없습니다.)")
 
     return results
 
-
-# ── 4. 품목 설명 생성 및 재저장 ──────────────────────────────────────
-#     기존 문서(품목명)·임베딩은 그대로 두고, 각 품목에 description
-#     메타데이터만 추가로 채워 넣습니다 (검색 품질에 영향 없음).
+# ── 4. KAMIS 품목 설명 생성 (설명 자체를 임베딩 대상으로 사용) ──────────
+#     get_kamis_names()로 얻은 품목명마다 한줄 설명을 만들고,
+#     그 "설명 텍스트"를 documents(임베딩 대상)로 저장합니다.
+#     원래 품목명은 metadata["name"]에 남겨서 나중에 표시용으로 씁니다.
 
 def _get_desc_llm() -> ChatUpstage:
     return ChatUpstage(
@@ -283,8 +337,6 @@ async def _generate_descriptions_with_progress(
     llm = _get_desc_llm()
     semaphore = asyncio.Semaphore(concurrency)
 
-    # asyncio.as_completed는 완료 순서를 알 수 없으니, 이름을 다시 매핑해두기 위해
-    # 태스크마다 (name, coroutine)을 묶어서 관리
     tasks = [
         asyncio.ensure_future(_generate_one_description(llm, semaphore, name))
         for name in names
@@ -301,41 +353,33 @@ async def _generate_descriptions_with_progress(
     return descriptions
 
 
-def update_collection_with_descriptions(
-    collection_name: str = COLLECTION_NAME,
-    path: str = CHROMA_DB_PATH,
-    concurrency: int = 5,
-):
-    """컬렉션 안의 모든 품목에 대해 LLM으로 한줄 설명을 생성해 metadata로 재저장."""
+def get_kamis_items_with_descriptions(concurrency: int = 5) -> list[dict]:
+    """KAMIS 품목명을 가져와 한줄 설명을 생성하고,
+    설명 텍스트를 documents(임베딩 대상)로 하는 items 리스트로 변환.
+
+    반환 형태: [{"id": "kamis_0", "document": "<설명>", "metadata": {"name": "<원래 품목명>"}}, ...]
+    """
     if not UPSTAGE_API_KEY:
-        print("[설명 생성 실패] UPSTAGE_API_KEY가 .env에 없습니다.")
-        return None
+        raise RuntimeError("UPSTAGE_API_KEY가 .env에 없어서 설명을 생성할 수 없습니다.")
 
-    client = chromadb.PersistentClient(path=path)
-    collection = client.get_collection(collection_name)
+    names = get_kamis_names()
+    print(f"\nKAMIS 품목 {len(names)}개에 대한 설명 생성 시작 (동시 {concurrency}개)...")
 
-    existing = collection.get(include=["documents"])
-    ids = existing["ids"]
-    names = existing["documents"]
-
-    print(f"총 {len(ids)}개 품목에 대한 설명 생성 시작 (동시 {concurrency}개)...")
-
-    unique_names = list(dict.fromkeys(names))  # 같은 이름 중복 호출 방지
     descriptions = asyncio.run(
-        _generate_descriptions_with_progress(unique_names, concurrency=concurrency)
+        _generate_descriptions_with_progress(names, concurrency=concurrency)
     )
 
-    metadatas = [{"description": descriptions.get(name, "")} for name in names]
+    items = []
+    for i, name in enumerate(names):
+        desc = descriptions.get(name, "").strip()
+        document_text = desc if desc else name  # 설명 생성 실패 시 이름으로 대체
+        items.append({
+            "id": f"kamis_{i}",
+            "document": document_text,
+            "metadata": {"name": name, "source": "kamis"},
+        })
 
-    batch_size = 100
-    for i in tqdm(range(0, len(ids), batch_size), desc="Chroma metadata 업데이트 중"):
-        collection.update(
-            ids=ids[i:i + batch_size],
-            metadatas=metadatas[i:i + batch_size],
-        )
-
-    print(f"'{collection_name}' 설명 저장 완료 ({len(ids)}개).")
-    return collection
+    return items
 
 
 # ── 5. 실행 ─────────────────────────────────────────────────────────
@@ -348,18 +392,17 @@ def main():
 
     print("\n── 결과 요약 ──")
 
-    kamis_names = get_kamis_names()
-    kamis_items = names_to_items(kamis_names, prefix="kamis")
+    # KAMIS: 설명을 생성해서 그 설명 텍스트를 임베딩 대상으로 저장
+    kamis_items = get_kamis_items_with_descriptions()
     save_items_to_chroma(kamis_items, collection_name=COLLECTION_NAME)
 
+    # 참가격: 기존 방식 그대로 (품목명 자체를 임베딩)
     price_items = get_price_gokr_items()
-    price_items = [{"id": f"pricegokr_{it['id']}", "name": it["name"]} for it in price_items]
+    price_items = [{"id": f"pricegokr_{it['id']}", "document": it["name"]} for it in price_items]
     collection = save_items_to_chroma(price_items, collection_name=COLLECTION_NAME)
 
     print(f"\n최종 컬렉션 '{COLLECTION_NAME}' 총 {collection.count()}개 품목")
 
-
 if __name__ == "__main__":
-    main()
-    update_collection_with_descriptions()   # 품목별 한줄 설명 생성 + 재저장 (LLM 호출, 시간 소요)
-    test_similar_search("떡볶이")
+    #main()
+    test_similar_search("사과")
