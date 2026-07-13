@@ -69,28 +69,8 @@ jobs:
           KAMIS_CERT_ID: ${{ secrets.KAMIS_CERT_ID }}
         run: uv run pytest
 
-  # coderabbit-review:
-  #   name: CodeRabbit AI review
-  #   if: github.event_name == 'pull_request'
-  #   needs: [lint, typecheck, secret-scan, test]
-  #   runs-on: ubuntu-latest
-  #   permissions:
-  #     contents: read
-  #     pull-requests: write
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #       with:
-  #         fetch-depth: 0
-  #     - name: Install CodeRabbit CLI
-  #       run: curl -fsSL https://cli.coderabbit.ai/install.sh | sh
-  #     - name: Authenticate
-  #       env:
-  #         CODERABBIT_API_KEY: ${{ secrets.CODERABBIT_API_KEY }}
-  #       run: coderabbit auth login --api-key "$CODERABBIT_API_KEY"
-  #     - name: Review PR diff against base branch
-  #       env:
-  #         CODERABBIT_API_KEY: ${{ secrets.CODERABBIT_API_KEY }}
-  #       run: coderabbit review --plain --base "${{ github.event.pull_request.base.ref }}"
-  #
-  # 비활성화 사유(2026-07-11): CLI 인증에는 Agentic API key가 필요한데 이건 유료 플랜에서만 발급됨.
-  # 이 repo가 본인 소유가 아니라 결제를 진행하기 어려운 상황이라 임시로 잠금. 유료 플랜 확보되면 주석 해제.
+# [2026-07-14 삭제] CodeRabbit을 CLI(Agentic API key 필요, 유료)가 아니라 GitHub App으로
+# 연동하기로 함 — GitHub App은 coderabbit.ai에서 조직 계정으로 설치하면 자체 인프라에서
+# PR을 자동 리뷰해줘서 CI 워크플로우/API 키/Docker가 전혀 필요 없음. 그래서 CLI 기반
+# coderabbit-review job 자체를 삭제 — 조직(food-compass-organization)에 GitHub App을
+# 설치하는 것으로 대체(레포 설정에서 별도 진행 필요, CI 파일과는 무관).
