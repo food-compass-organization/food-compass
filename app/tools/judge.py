@@ -89,14 +89,14 @@ def judge_price(
     last_week = parse_price(dpr3)
     last_month = parse_price(dpr5)
     avg = parse_price(dpr7)
+
+    if last_week is None or last_month is None or last_month == 0:
+        return JudgePriceOutput(status="적정", diff_pct=0.0)
+    
     normalized_price, normalized_unit = normalize_price_unit(last_week, unit)
     print( f"[normalize_price_unit] 원본: {last_week} {unit} "
     f"-> 변환: {normalized_price} {normalized_unit}")
-
-    if last_week is None or last_month is None or avg == 0:
-        return JudgePriceOutput(status="적정", diff_pct=0.0)
-
-    diff_pct = (last_week - last_month) / avg * 100
+    diff_pct = (last_week - last_month) / last_month * 100
 
     if diff_pct > _EXPENSIVE_THRESHOLD:
         status = "비쌈"

@@ -115,7 +115,8 @@ def _template_answer(judgments: list[dict], substitutes: list[str]) -> str:
             lines.append(ANSWER_UNSUPPORTED_LINE.format(item=j["item_name"]))
             continue
         sign = "+" if j["diff_pct"] >= 0 else ""
-        if parse_price(j.get("today_price", "-")) is not None:
+        today_price = j.get("today_price")
+        if today_price is not None:
             price_as_of = j.get("price_as_of")
             # [2026-07-14 추가] _price_facts()와 동일한 이유로, fallback 값을 쓴 경우
             # "N일 전 기준" 문구가 붙은 별도 템플릿 사용
