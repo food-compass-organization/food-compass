@@ -16,6 +16,7 @@ from app.prompts.prompts import (
     ANSWER_SUBSTITUTE_LINE,
     ANSWER_UNSUPPORTED_LINE,
     ANSWER_WEEK_DIFF_SUFFIX,
+    KNOWLEDGE_GENERATION_SYSTEM_PROMPT,
     KNOWLEDGE_STUB_RESPONSE,
     OFFTOPIC_RESPONSE,
 )
@@ -37,19 +38,27 @@ def _get_llm() -> ChatUpstage:
         timeout=30,
         max_retries=2,
     )
-
-
 llm = _get_llm()
 
 
 def search_knowledge_node(state: AgentState) -> dict[str, Any]:
-    """ChromaDB RAG 연동 전 임시 stub.
-
-    팀원의 app/tools/substitute.py 구현이 끝나면 그 함수 호출로 교체 예정.
-    """
+    """가격과 무관한 지식(보관법·대체품·제철정보 등) 질문에 대한 답변 생성."""
     items = state.get("items", [])
     item = items[0] if items else "해당 품목"
-    return {"knowledge_result": KNOWLEDGE_STUB_RESPONSE.format(item=item)}
+    user_query = state.get("user_query", "")
+
+    context = f"사용자 질문: {user_query}\n관련 품목: {item}"
+
+    try:
+        response = llm.invoke(
+            [
+                SystemMessage(content=KNOWLEDGE_GENERATION_SYSTEM_PROMPT),
+                HumanMessage(content=context),
+            ]
+        )
+        return {"knowledge_result": response.content}
+    except Exception:
+        return {"knowledge_result": KNOWLEDGE_STUB_RESPONSE.format(item=item)}
 
 
 def search_substitute_node(state: AgentState) -> dict[str, Any]:
