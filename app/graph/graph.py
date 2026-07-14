@@ -18,10 +18,8 @@ from .state import AgentState
 
 _EXPENSIVE_STATUS = "비쌈"
 
-
 def _route_decision(state: AgentState) -> str:
     return state.get("route", "off-topic")
-
 
 def _post_resolve_decision(state: AgentState) -> str:
     """[시나리오 1] 원물(kamis) + 가공식품(price_gokr) 2개 품목이 모두 조회됐으면
@@ -46,7 +44,6 @@ def _post_judge_decision(state: AgentState) -> str:
 
 def build_graph() -> StateGraph:
     graph = StateGraph(AgentState)
-
     graph.add_node("router", router_node)
     graph.add_node("get_raw_price", get_raw_price_node)
     graph.add_node("resolve_processed_items", resolve_processed_items_node)
@@ -57,6 +54,7 @@ def build_graph() -> StateGraph:
     graph.add_node("generate_answer", generate_answer_node)
     graph.add_node("generate_offtopic", generate_offtopic_node)
 
+    
     graph.add_edge(START, "router")
     graph.add_conditional_edges(
         "router",

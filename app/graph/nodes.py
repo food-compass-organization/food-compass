@@ -43,7 +43,6 @@ def _get_llm() -> ChatUpstage:
     )
 llm = _get_llm()
 
-
 def search_knowledge_node(state: AgentState) -> dict[str, Any]:
     """가격과 무관한 지식(보관법·대체품·제철정보 등) 질문에 대한 답변 생성."""
     items = state.get("items", [])
