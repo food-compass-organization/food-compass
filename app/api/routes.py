@@ -49,7 +49,15 @@ async def chat(request: ChatRequest):
 
                 # mode == "updates": 노드 하나가 완료될 때마다 전체 상태(state)를 갱신
                 for node_name, node_output in payload.items():
-                    state.update(node_output)
+                    # [2026-07-14 근본 원인 수정] resolve_processed_items_node처럼 상태를
+                    # 바꾸지 않는(빈 dict `{}` 반환) 노드의 출력을, LangGraph가 이 스트리밍
+                    # payload에서 `None`으로 표현하는 경우가 있음(재현 확인함) —
+                    # state.update(None)은 "TypeError: 'NoneType' object is not iterable"을
+                    # 던져서 SSE 스트림 전체가 죽었었음. 실제로 원물 1개만 조회하는(시나리오 1의
+                    # 2품목 비교가 아닌) 흔한 경로마다 이 노드가 항상 빈 dict를 반환해서 자주
+                    # 터졌던 것 — "상추 지금 비싸?"는 실패하고 "쌀 vs 즉석밥"은 성공했던 이유.
+                    if node_output:
+                        state.update(node_output)
                     print(f"[Graph] 노드 실행: {node_name} (route={state.get('route')})")
                     if node_name == "router" and state.get("route") != "price":
                         continue

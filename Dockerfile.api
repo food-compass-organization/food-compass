@@ -15,6 +15,14 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
+# [2026-07-14 추가] app/tools/vector_store.py가 쓰는 임베딩 모델(jhgan/ko-sroberta-multitask,
+# ~443MB)을 빌드 타임에 미리 받아 이미지에 포함시킴 — 안 그러면 컨테이너가 재배포/재시작될
+# 때마다 매번 새로 다운로드해야 해서, CD 헬스체크(최대 60초) 안에 기동을 못 마치고
+# 자동 롤백되는 문제가 실제로 발생했음(2026-07-14 CD 배포 실패로 확인).
+# `uv run`이 아니라 `.venv/bin/python`을 직접 써야 함 — `uv run`은 실행 시 dev 그룹까지
+# 다시 동기화해서 `--no-dev`로 설치한 걸 무의미하게 만듦(CMD에서 이미 겪었던 것과 동일 문제)
+RUN .venv/bin/python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('jhgan/ko-sroberta-multitask')"
+
 COPY app/ app/
 
 ENV PATH="/app/.venv/bin:$PATH"
