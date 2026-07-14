@@ -26,6 +26,8 @@ _STREAMING_ANSWER_NODES = {"generate_answer"}
 
 class ChatRequest(BaseModel):
     query: str
+    region: str | None = None
+    unit: str | None = None
 
 
 def _sse(event: str, data: dict) -> dict:
@@ -37,7 +39,11 @@ async def chat(request: ChatRequest):
     async def event_generator():
         yield _sse("status", {"step": "의도 분류 중..."})
 
-        state: dict = {"user_query": request.query}
+        state: dict = {
+            "user_query": request.query,
+            "region": request.region,
+            "unit": request.unit,}
+        print(f"[/chat] ChatRequest 수신: query={state['user_query']}, region={state['region']}, unit={state['unit']}")
         try:
             async for mode, payload in compiled_graph.astream(
                 state,
