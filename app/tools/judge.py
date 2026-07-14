@@ -30,10 +30,13 @@ def _pct_diff(current: float | None, past: float | None) -> float | None:
 def judge_price(
     dpr1: str, dpr7: str, dpr3: str | None = None, dpr5: str | None = None, unit: str | None = None,
 ) -> JudgePriceOutput:
-    """당일가(dpr1)를 평년가(dpr7)와 비교하여 비쌈/적정/쌈 판정.
+    """1주일전가(dpr3)를 1개월전가(dpr5)와 비교하여 비쌈/적정/쌈 판정.
 
-    dpr3(1주일전)·dpr5(1개월전)이 주어지면 참고용 등락률도 함께 계산 — 판정 기준(비쌈/적정/쌈)은
-    평년가 대비로 유지하되, 답변 생성 시 최근 추세를 함께 설명할 수 있도록 부가 정보로 제공.
+    [2026-07-14 수정] 당일가(dpr1) 결측이 잦아서(다른 PC에서 작업) 판정 기준을
+    dpr1 vs dpr7(평년)에서 dpr3 vs dpr5로 변경한 상태 — 이 docstring이 옛 설명
+    ("당일가를 평년가와 비교")으로 남아있어 실제 로직과 안 맞았던 것만 바로잡음
+    (동작 자체는 변경 없음). dpr1/dpr7은 현재 판정에 쓰이지 않음(dpr7은 참고용
+    month_diff_pct 계산에만 사용).
     """
     last_week = parse_price(dpr3)
     last_month = parse_price(dpr5)
@@ -41,10 +44,8 @@ def judge_price(
 
     if last_week is None or last_month is None or last_month == 0:
         return JudgePriceOutput(status="적정", diff_pct=0.0)
-    
+
     normalized_price, normalized_unit = normalize_price_unit(last_week, unit)
-    print( f"[normalize_price_unit] 원본: {last_week} {unit} "
-    f"-> 변환: {normalized_price} {normalized_unit}")
     diff_pct = (last_week - last_month) / last_month * 100
 
     if diff_pct > _EXPENSIVE_THRESHOLD:
@@ -54,15 +55,16 @@ def judge_price(
     else:
         status = "적정"
 
-    week_diff_pct = _pct_diff(last_week, last_month) if dpr3 is not None else None
+    # [2026-07-14 제거] week_diff_pct는 _pct_diff(last_week, last_month)로 diff_pct와
+    # 완전히 동일한 계산이라(둘 다 1주일전 vs 1개월전) 라벨을 정확히 고치고 나니 답변에
+    # "1개월 전 대비 X%"가 중복으로 두 번 나오는 문제가 있어 필드 자체를 제거함
     month_diff_pct = _pct_diff(last_month, avg) if dpr5 is not None else None
 
     return JudgePriceOutput(
         status=status,
         diff_pct=round(diff_pct, 1),
-        week_diff_pct=week_diff_pct,
         month_diff_pct=month_diff_pct,
-        normalized_price = normalized_price,
+        normalized_price=normalized_price,
         unit=normalized_unit,
     )
 
@@ -78,7 +80,6 @@ def judge_price_node(state: AgentState) -> dict[str, Any]:
                     "item_name": item.get("item_name"),
                     "status": "미지원",
                     "diff_pct": None,
-                    "week_diff_pct": None,
                     "month_diff_pct": None,
                 }
             )
@@ -96,7 +97,6 @@ def judge_price_node(state: AgentState) -> dict[str, Any]:
                 "item_name": item.get("item_name"),
                 "status": result.status,
                 "diff_pct": result.diff_pct,
-                "week_diff_pct": result.week_diff_pct,
                 "month_diff_pct": result.month_diff_pct,
                 # 답변 생성 단계에서 실제 금액을 지어내지 않도록 조회된 값 그대로 전달
                 "today_price": result.normalized_price,

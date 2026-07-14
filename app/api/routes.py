@@ -37,24 +37,35 @@ async def chat(request: ChatRequest):
         yield _sse("status", {"step": "의도 분류 중..."})
 
         state: dict = {"user_query": request.query}
-        async for mode, payload in compiled_graph.astream(
-            state, stream_mode=["updates", "messages"]
-        ):
-            if mode == "messages":
-                message_chunk, metadata = payload
-                if metadata.get("langgraph_node") in _STREAMING_ANSWER_NODES and message_chunk.content:
-                    yield _sse("token", {"delta": message_chunk.content})
-                continue
-
-            # mode == "updates": 노드 하나가 완료될 때마다 전체 상태(state)를 갱신
-            for node_name, node_output in payload.items():
-                state.update(node_output)
-                print(f"[Graph] 노드 실행: {node_name} (route={state.get('route')})")
-                if node_name == "router" and state.get("route") != "price":
+        try:
+            async for mode, payload in compiled_graph.astream(
+                state, stream_mode=["updates", "messages"]
+            ):
+                if mode == "messages":
+                    message_chunk, metadata = payload
+                    if metadata.get("langgraph_node") in _STREAMING_ANSWER_NODES and message_chunk.content:
+                        yield _sse("token", {"delta": message_chunk.content})
                     continue
-                next_status = _NEXT_STEP_STATUS.get(node_name)
-                if next_status:
-                    yield _sse("status", {"step": next_status})
+
+                # mode == "updates": 노드 하나가 완료될 때마다 전체 상태(state)를 갱신
+                for node_name, node_output in payload.items():
+                    state.update(node_output)
+                    print(f"[Graph] 노드 실행: {node_name} (route={state.get('route')})")
+                    if node_name == "router" and state.get("route") != "price":
+                        continue
+                    next_status = _NEXT_STEP_STATUS.get(node_name)
+                    if next_status:
+                        yield _sse("status", {"step": next_status})
+        except Exception as e:
+            # [2026-07-14 추가] 여기 try/except가 없어서 그래프 실행 중 예외(예: Supabase
+            # 일시적 연결 장애)가 나면 SSE 스트림이 완료 이벤트 없이 그대로 끊겼음 — 프론트
+            # 엔드(httpx.stream)에서는 이게 "peer closed connection without sending complete
+            # message body"(RemoteProtocolError)로 보임. 어떤 노드에서 실패하든 항상
+            # result+done 이벤트로 스트림을 정상 종료시켜서 이 문제를 방지.
+            print(f"[/chat] 그래프 실행 중 오류: {e!r}")
+            yield _sse("result", {"answer": "죄송해요, 일시적인 오류로 답변을 만들지 못했어요. 잠시 후 다시 시도해주세요."})
+            yield _sse("done", {})
+            return
 
         yield _sse("result", {"answer": state.get("answer", "")})
         yield _sse("done", {})
