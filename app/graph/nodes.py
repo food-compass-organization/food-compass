@@ -15,7 +15,6 @@ from app.prompts.prompts import (
     ANSWER_PRICE_WITH_AMOUNT_LINE,
     ANSWER_SUBSTITUTE_LINE,
     ANSWER_UNSUPPORTED_LINE,
-    ANSWER_WEEK_DIFF_SUFFIX,
     COMPARISON_ANSWER_SYSTEM_PROMPT,
     KNOWLEDGE_GENERATION_SYSTEM_PROMPT,
     KNOWLEDGE_STUB_RESPONSE,
@@ -269,9 +268,6 @@ def _template_answer(judgments: list[dict], substitutes: list[str]) -> str:
                 )
         else:
             line = ANSWER_PRICE_LINE.format(item=j["item_name"], sign=sign, diff=j["diff_pct"], status=j["status"])
-        week_diff = j.get("week_diff_pct")
-        if week_diff is not None:
-            line += ANSWER_WEEK_DIFF_SUFFIX.format(sign="+" if week_diff >= 0 else "", diff=week_diff)
         month_diff = j.get("month_diff_pct")
         if month_diff is not None:
             line += ANSWER_MONTH_DIFF_SUFFIX.format(sign="+" if month_diff >= 0 else "", diff=month_diff)
@@ -297,17 +293,16 @@ def _price_facts(judgments: list[dict], substitutes: list[str]) -> str:
             # 말하지 않도록 데이터 단계에서부터 명시.
             price_as_of = j.get("price_as_of")
             price_label = "현재가" if price_as_of in (None, "당일") else f"{price_as_of} 가격(당일 데이터 미반영)"
-            line = f"- {j['item_name']}: {price_label} {j['today_price']}원/{j.get('unit', '-')}, 평년 대비 {sign}{j['diff_pct']}% ({j['status']})"
+            # [2026-07-14 라벨 수정] diff_pct는 실제로 1주일전(dpr3) vs 1개월전(dpr5) 계산이라
+            # "평년 대비"가 아니라 "1개월 전 대비"가 맞는 라벨 (계산 자체는 변경 없음)
+            line = f"- {j['item_name']}: {price_label} {j['today_price']}원/{j.get('unit', '-')}, 1개월 전 대비 {sign}{j['diff_pct']}% ({j['status']})"
         else:
-            line = f"- {j['item_name']}: 평년 대비 {sign}{j['diff_pct']}% ({j['status']}) (현재가 데이터 없음 — 금액을 지어내지 말 것)"
-        week_diff = j.get("week_diff_pct")
-        if week_diff is not None:
-            wsign = "+" if week_diff >= 0 else ""
-            line += f", 1주일 전 대비 {wsign}{week_diff}%"
+            line = f"- {j['item_name']}: 1개월 전 대비 {sign}{j['diff_pct']}% ({j['status']}) (현재가 데이터 없음 — 금액을 지어내지 말 것)"
         month_diff = j.get("month_diff_pct")
         if month_diff is not None:
             msign = "+" if month_diff >= 0 else ""
-            line += f", 1개월 전 대비 {msign}{month_diff}%"
+            # month_diff_pct = 1개월전(dpr5) vs 평년(dpr7) → "평년 대비"가 정확한 라벨
+            line += f", 평년 대비 {msign}{month_diff}%"
         lines.append(line)
     if substitutes:
         lines.append(f"- 대체 가능 품목: {', '.join(substitutes)}")
